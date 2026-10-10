@@ -1,0 +1,283 @@
+import {useEffect, useRef, useState} from "react"
+
+import {ActionButton as Button} from "./ActionButton"
+
+import {requestRollingSkill} from "../api"
+import type {Translate} from "../locale"
+import type {WorkbenchRoute} from "./Workbench"
+import {RubricSessionView} from "./RubricSessionView"
+import {usePollingRevision} from "./usePollingRevision"
+import {AgentProfileControls} from "./AgentProfileControls"
+import {displayDateTime, displayStatus} from "./display-state"
+
+interface Dataset {id: string; name: string; activeRubricVersionId: string | null}
+interface RubricSessionSummary {id: string; status: string; updatedAt: string; baseVersionId: string | null}
+interface RollingSettings {rollingSkill: {rubricProfile: {modelId: string | null; effort: string | null}}; plugin: {runtime: {runtimeId: string} | null}}
+interface RubricCriterion {
+    id?: string
+    title?: string
+    criterion?: string
+    weight?: number
+    evidenceRequirements?: string[]
+    scoringAnchors?: Record<string, string>
+    criticalFailure?: boolean
+}
+interface RubricAutomaticFailure {id?: string; condition?: string; rationale?: string}
+const WORKING_RUBRIC_STATUSES = new Set(["queued", "running"])
+interface RubricVersion {
+    id: string
+    version: number
+    rubricDigest?: string | null
+    rubric: {
+        title?: string
+        summary?: string
+        scoringModel?: string
+        criteria?: RubricCriterion[]
+        automaticFailures?: RubricAutomaticFailure[]
+    }
+    operationEvidence?: {
+        skillName?: string | null
+        versionLabel?: string | null
+        commit?: string | null
+        contentDigest?: string | null
+        runtime?: {displayName?: string | null; version?: string | null} | null
+        installation?: {jobId?: string | null; verification?: string | null; installedAt?: string | null} | null
+    } | null
+    createdAt: string
+}
+
+export function RubricPanel({
+    t,
+    initialDatasetId,
+    initialSessionId,
+    onNavigate,
+}: {
+    t: Translate
+    initialDatasetId?: string
+    initialSessionId?: string
+    onNavigate: (route: WorkbenchRoute) => void
+}) {
+    const [datasets, setDatasets] = useState<Dataset[]>([])
+    const [datasetId, setDatasetId] = useState(initialDatasetId ?? "")
+    const [selectedSessionId, setSelectedSessionId] = useState(initialSessionId ?? "")
+    const [selectedVersionId, setSelectedVersionId] = useState("")
+    const [sessions, setSessions] = useState<RubricSessionSummary[]>([])
+    const [versions, setVersions] = useState<RubricVersion[]>([])
+    const [active, setActive] = useState<RubricVersion | null>(null)
+    const [modelId, setModelId] = useState("")
+    const [effort, setEffort] = useState("")
+    const [runtimeId, setRuntimeId] = useState("")
+    const loadedDatasetId = useRef("")
+    const [busy, setBusy] = useState(false)
+    const [creating, setCreating] = useState(false)
+    const [promptOpen, setPromptOpen] = useState(false)
+    const [initialInstruction, setInitialInstruction] = useState("")
+    const [error, setError] = useState<string | null>(null)
+    const generatingSession = sessions.find((session) => WORKING_RUBRIC_STATUSES.has(session.status))
+    const generationPending = creating || Boolean(generatingSession)
+    const [revision, refresh] = usePollingRevision(Boolean(generatingSession))
+
+    useEffect(() => {
+        const controller = new AbortController()
+        Promise.all([
+            requestRollingSkill<Dataset[]>("datasets.list", {}, controller.signal),
+            requestRollingSkill<RollingSettings>("settings.get", {}, controller.signal),
+        ])
+            .then(([rows, settings]) => {
+                setDatasets(rows)
+                setRuntimeId(settings.plugin?.runtime?.runtimeId ?? "")
+                setDatasetId((current) => current || rows[0]?.id || "")
+                setModelId((current) => current || settings.rollingSkill.rubricProfile.modelId || "")
+                setEffort((current) => current || settings.rollingSkill.rubricProfile.effort || "")
+            }).catch((reason: unknown) => {
+                if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : t("loadError"))
+            })
+        return () => controller.abort()
+    }, [])
+
+    useEffect(() => {
+        if (!datasetId) return
+        const controller = new AbortController()
+        requestRollingSkill<{sessions: RubricSessionSummary[]; versions: RubricVersion[]; active: RubricVersion | null}>(
+            "rubrics.list",
+            {datasetId},
+            controller.signal,
+        ).then((result) => {
+            const firstLoad = loadedDatasetId.current !== datasetId
+            loadedDatasetId.current = datasetId
+            setSessions(result.sessions)
+            setVersions(result.versions)
+            setActive(result.active)
+            setSelectedSessionId((current) => result.sessions.some((session) => session.id === current)
+                ? current
+                : firstLoad ? result.sessions.find((session) => WORKING_RUBRIC_STATUSES.has(session.status))?.id ?? result.sessions[0]?.id ?? "" : "")
+            setSelectedVersionId((current) => result.versions.some((version) => version.id === current) ? current : result.active?.id ?? result.versions[0]?.id ?? "")
+            setError(null)
+        }).catch((reason: unknown) => {
+            if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : t("loadError"))
+        })
+        return () => controller.abort()
+    }, [datasetId, revision])
+
+    const create = async (instruction: string) => {
+        if (!datasetId || busy) return
+        setBusy(true)
+        setCreating(true)
+        setError(null)
+        try {
+            const session = await requestRollingSkill<RubricSessionSummary>("rubrics.create", {
+                datasetId,
+                modelId: modelId || null,
+                effort: effort || null,
+                initialInstruction: instruction,
+                idempotencyKey: `rubric-create:${datasetId}:${globalThis.crypto.randomUUID()}`,
+            })
+            setSessions((current) => [session, ...current.filter((entry) => entry.id !== session.id)])
+            setSelectedSessionId(session.id)
+            onNavigate({page: "rubrics", datasetId, sessionId: session.id})
+            refresh()
+            setPromptOpen(false)
+            setInitialInstruction("")
+        } catch (reason) {
+            setError(reason instanceof Error ? reason.message : t("loadError"))
+        } finally {
+            setCreating(false)
+            setBusy(false)
+        }
+    }
+    const closePrompt = () => {
+        if (creating) return
+        setPromptOpen(false)
+        setError(null)
+    }
+    const migrateLegacy = async () => {
+        if (!datasetId || busy) return
+        setBusy(true)
+        setError(null)
+        try {
+            await requestRollingSkill("rubrics.migrateLegacy", {
+                datasetId,
+                idempotencyKey: crypto.randomUUID(),
+            })
+            refresh()
+        } catch (reason) {
+            setError(reason instanceof Error ? reason.message : t("loadError"))
+        } finally {
+            setBusy(false)
+        }
+    }
+
+    const selectedVersion = versions.find((version) => version.id === selectedVersionId) ?? active
+
+    return (
+        <>
+            <div className="rolling-skill-review-layout">
+                <aside className="rolling-skill-panel rolling-skill-review-list">
+                <div className="rolling-skill-panel-header"><div><h3>{t("rubrics")}</h3><p>{t("rubricDescription")}</p></div></div>
+                <label className="rolling-skill-field"><span>{t("selectDataset")}</span><select className="rolling-skill-select" value={datasetId} onChange={(event) => { setDatasetId(event.target.value); setSelectedSessionId(""); setSelectedVersionId("") }}>{datasets.map((dataset) => <option key={dataset.id} value={dataset.id}>{dataset.name}</option>)}</select></label>
+                <div className="rolling-skill-form-stack rolling-skill-create-rubric">
+                    <AgentProfileControls t={t} runtimeId={runtimeId} modelId={modelId} effort={effort} disabled={busy} onModelChange={setModelId} onEffortChange={setEffort}/>
+                    <Button tone="primary" disabled={!datasetId || busy || Boolean(generatingSession)} aria-busy={generationPending} onClick={() => setPromptOpen(true)}>{creating ? t("creatingRubric") : generatingSession ? t("generatingRubric") : t("createRubric")}</Button>
+                    {generationPending ? <p className="rolling-skill-operation-status" role="status" aria-live="polite">{t(creating ? "creatingRubricStatus" : "generatingRubricStatus")}</p> : null}
+                </div>
+                {error ? <p className="rolling-skill-inline-error" role="alert">{error}</p> : null}
+                <h4>{t("rubricSessions")}</h4>
+                <div className="rolling-skill-list">
+                    {sessions.map((session) => <button type="button" className="rolling-skill-review-list-button" data-selected={selectedSessionId === session.id} key={session.id} onClick={() => { setSelectedSessionId(session.id); onNavigate({page: "rubrics", datasetId, sessionId: session.id}) }}><strong>{displayStatus(session.status, t)}</strong><span>{displayDateTime(session.updatedAt, t("notAvailable"))}</span></button>)}
+                </div>
+                <h4>{t("rubricHistory")}</h4>
+                {!active ? <p>{t("noActiveRubric")}</p> : null}
+                {active && active.rubric.scoringModel !== "unified-100/v1" ? <section className="rolling-skill-subpanel"><p>{t("legacyRubricNotice")}</p><Button size="sm" disabled={busy} onClick={() => void migrateLegacy()}>{t("migrateLegacyRubric")}</Button></section> : null}
+                <div className="rolling-skill-list">{versions.map((version) => <RubricVersionListButton key={version.id} version={version} active={version.id === active?.id} selected={!selectedSessionId && selectedVersion?.id === version.id} t={t} onSelect={() => { setSelectedSessionId(""); setSelectedVersionId(version.id); onNavigate({page: "rubrics", datasetId}) }}/>)}</div>
+                </aside>
+                <main className="rolling-skill-review-detail">
+                    {selectedSessionId ? <RubricSessionView key={selectedSessionId} sessionId={selectedSessionId} t={t} onChanged={refresh}/> : selectedVersion ? <RubricVersionCard version={selectedVersion} active={selectedVersion.id === active?.id} t={t}/> : <div className="rolling-skill-state">{t("selectRubricSession")}</div>}
+                </main>
+            </div>
+            {promptOpen ? (
+                <div className="rolling-skill-dialog-backdrop" onMouseDown={(event) => {
+                    if (event.currentTarget === event.target) closePrompt()
+                }}>
+                    <form
+                        className="rolling-skill-dialog rolling-skill-rubric-prompt-dialog"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="rolling-skill-rubric-prompt-title"
+                        onSubmit={(event) => {
+                            event.preventDefault()
+                            void create(initialInstruction.trim())
+                        }}
+                    >
+                        <header className="rolling-skill-dialog-header">
+                            <div>
+                                <h2 id="rolling-skill-rubric-prompt-title">{t("rubricPromptTitle")}</h2>
+                                <p>{t("rubricPromptHelp")}</p>
+                            </div>
+                            <Button tone="quiet" size="sm" type="button" disabled={creating} onClick={closePrompt} aria-label={t("close")}>×</Button>
+                        </header>
+                        <label className="rolling-skill-field">
+                            <span>{t("rubricPromptLabel")}</span>
+                            <textarea
+                                className="rolling-skill-textarea"
+                                value={initialInstruction}
+                                maxLength={120000}
+                                autoFocus
+                                placeholder={t("rubricPromptPlaceholder")}
+                                onChange={(event) => setInitialInstruction(event.target.value)}
+                            />
+                        </label>
+                        {error ? <p className="rolling-skill-inline-error" role="alert">{error}</p> : null}
+                        <div className="rolling-skill-actions rolling-skill-dialog-actions">
+                            <Button type="button" disabled={creating} onClick={closePrompt}>{t("cancel")}</Button>
+                            <Button tone="primary" type="submit" disabled={creating} aria-busy={creating}>
+                                {creating ? t("creatingRubric") : t("startRubricGeneration")}
+                            </Button>
+                        </div>
+                    </form>
+                </div>
+            ) : null}
+        </>
+    )
+}
+
+function RubricVersionListButton({version, active, selected, t, onSelect}: {version: RubricVersion; active: boolean; selected: boolean; t: Translate; onSelect: () => void}) {
+    return <button type="button" className="rolling-skill-review-list-button" data-selected={selected} onClick={onSelect}><strong>v{version.version} · {version.rubric.title ?? t("notAvailable")}</strong><span>{new Date(version.createdAt).toLocaleString()}{active ? ` · ${t("activeRubric")}` : ""}</span></button>
+}
+
+function RubricVersionCard({version, active, t}: {version: RubricVersion; active: boolean; t: Translate}) {
+    const evidence = version.operationEvidence
+    return (
+        <details className="rolling-skill-rubric-version" open>
+            <summary>
+                <span><strong>v{version.version} · {version.rubric.title ?? t("notAvailable")}</strong><small>{new Date(version.createdAt).toLocaleString()}</small></span>
+                {active ? <span className="rolling-skill-badge">{t("activeRubric")}</span> : null}
+            </summary>
+            <div className="rolling-skill-rubric-version-body">
+                <p>{version.rubric.summary}</p>
+                <dl>
+                    <div><dt>{t("scoringModel")}</dt><dd>{version.rubric.scoringModel ?? t("notAvailable")}</dd></div>
+                    <div><dt>{t("rubricDigest")}</dt><dd title={version.rubricDigest ?? undefined}><code>{version.rubricDigest ?? t("notAvailable")}</code></dd></div>
+                    {evidence ? <>
+                        <div><dt>{t("skillRepositories")}</dt><dd>{evidence.skillName ?? t("notAvailable")} · {evidence.versionLabel ?? t("notAvailable")}</dd></div>
+                        <div><dt>{t("installationCommit")}</dt><dd><code>{evidence.commit?.slice(0, 12) ?? t("notAvailable")}</code></dd></div>
+                        <div><dt>{t("installationRuntime")}</dt><dd>{evidence.runtime?.displayName ?? t("notAvailable")} {evidence.runtime?.version ?? ""}</dd></div>
+                        <div><dt>{t("installationJob")}</dt><dd>{evidence.installation?.jobId ?? t("notAvailable")} · {evidence.installation?.verification ?? t("notAvailable")}</dd></div>
+                    </> : null}
+                </dl>
+                <h4>{t("rubricCriteria")}</h4>
+                <div className="rolling-skill-rubric-criteria">
+                    {version.rubric.criteria?.map((criterion) => (
+                        <article key={criterion.id}>
+                            <header><strong>{criterion.id} · {criterion.title}</strong><span>{t("weight")} {criterion.weight}</span></header>
+                            <p>{criterion.criterion}</p>
+                            {criterion.evidenceRequirements?.length ? <p><b>{t("rubricEvidenceRequirements")}: </b>{criterion.evidenceRequirements.join(" · ")}</p> : null}
+                            {criterion.scoringAnchors ? <details><summary>{t("scoringAnchors")}</summary><dl>{Object.entries(criterion.scoringAnchors).map(([score, anchor]) => <div key={score}><dt>{score}</dt><dd>{anchor}</dd></div>)}</dl></details> : null}
+                            {criterion.criticalFailure ? <span className="rolling-skill-inline-error">{t("criticalFailure")}</span> : null}
+                        </article>
+                    ))}
+                </div>
+                {version.rubric.automaticFailures?.length ? <section><h4>{t("automaticFailures")}</h4><div className="rolling-skill-rubric-criteria">{version.rubric.automaticFailures.map((failure) => <article key={failure.id}><strong>{failure.id} · {failure.condition}</strong><p>{failure.rationale}</p></article>)}</div></section> : null}
+            </div>
+        </details>
+    )
+}

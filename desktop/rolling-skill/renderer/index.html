@@ -1,0 +1,1113 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="codex-light">
+    <head>
+        <meta charset="UTF-8" />
+        <meta
+            http-equiv="Content-Security-Policy"
+            content="default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'"
+        />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Rolling Skill</title>
+        <link rel="stylesheet" href="styles.css" />
+    </head>
+    <body>
+        <div class="window-drag-region" aria-hidden="true"></div>
+        <div class="app-shell">
+            <aside class="sidebar">
+                <div class="sidebar-header">
+                    <div class="brand">
+                        <img src="logo.svg" alt="" />
+                        <span>Rolling Skill</span>
+                    </div>
+                    <div id="surface-switch" class="surface-switch" role="group" aria-label="Main surface">
+                        <button class="active" type="button" data-surface="chat" data-i18n="chat">Chat</button>
+                        <button type="button" data-surface="evaluation" data-i18n="skillEvaluation">Skill evaluation</button>
+                        <button type="button" data-surface="skills" data-i18n="skillManagement">Skill management</button>
+                        <button type="button" data-surface="operator" data-i18n="operator">Self-operation</button>
+                    </div>
+                    <button id="new-task" class="new-task-button" type="button">
+                        <span aria-hidden="true">＋</span>
+                        <span data-i18n="newTask">New task</span>
+                        <kbd>⌘N</kbd>
+                    </button>
+                </div>
+
+                <div class="task-heading">
+                    <span data-i18n="tasks">Tasks</span>
+                    <button id="refresh-threads" class="icon-button" type="button" title="Refresh tasks">
+                        ↻
+                    </button>
+                </div>
+                <div id="thread-view-switch" class="thread-view-switch" role="tablist" aria-label="Task history">
+                    <button class="active" type="button" role="tab" aria-selected="true" data-thread-view="current" data-i18n="currentThreads">Current</button>
+                    <button type="button" role="tab" aria-selected="false" data-thread-view="archived" data-i18n="archivedThreads">Archived</button>
+                </div>
+                <div id="thread-history-status" class="thread-history-status hidden" role="status"></div>
+                <div id="sidebar-workspace-path" class="sidebar-workspace-path" title=""></div>
+                <nav id="thread-list" class="thread-list" aria-label="Tasks">
+                    <div class="sidebar-placeholder">Loading local tasks…</div>
+                </nav>
+
+                <div class="sidebar-footer">
+                    <button id="workspace-button" class="workspace-button" type="button">
+                        <span class="workspace-icon" aria-hidden="true">⌁</span>
+                        <span class="workspace-copy">
+                            <span class="workspace-label" data-i18n="workspace">Workspace</span>
+                            <span id="workspace-name" class="workspace-name">Loading…</span>
+                        </span>
+                        <span aria-hidden="true">›</span>
+                    </button>
+                    <button id="settings-button" class="settings-button" type="button">
+                        <span class="settings-icon" aria-hidden="true">⚙</span>
+                        <span data-i18n="settings">Settings</span>
+                        <span aria-hidden="true">›</span>
+                    </button>
+                    <div class="capture-note">
+                        <span class="capture-dot" aria-hidden="true"></span>
+                        <span id="capture-status" data-i18n="autoCaptureOff">Automatic capture is off</span>
+                    </div>
+                </div>
+            </aside>
+
+            <main class="workbench">
+                <header class="topbar">
+                    <div class="task-title-wrap">
+                        <div id="active-title" class="active-title" data-i18n="newTask">New task</div>
+                        <div id="workspace-path" class="workspace-path"></div>
+                    </div>
+                    <button id="runtime-status" class="runtime-status starting" type="button">
+                        <span class="runtime-dot" aria-hidden="true"></span>
+                        <span id="runtime-label" data-i18n="detectingRuntimes">Detecting local runtimes</span>
+                    </button>
+                    <button id="topbar-raw-cases" class="topbar-button raw-case-toggle" type="button">
+                        <span data-i18n="rawCases">Raw Cases</span>
+                        <span id="raw-case-count" class="raw-case-count">0</span>
+                    </button>
+                    <button id="topbar-curations" class="topbar-button" type="button" data-i18n="caseDrafts">Case drafts</button>
+                    <button id="topbar-trace" class="topbar-button" type="button" data-i18n="trace">Trace</button>
+                </header>
+
+                <div id="error-banner" class="error-banner hidden" role="alert">
+                    <div>
+                        <strong data-i18n="taskCouldNotContinue">Task could not continue</strong>
+                        <span id="error-message"></span>
+                    </div>
+                    <button id="dismiss-error" type="button" data-i18n="dismiss">Dismiss</button>
+                </div>
+
+                <section id="conversation-scroll" class="conversation-scroll">
+                    <div id="conversation" class="conversation" aria-live="polite"></div>
+                </section>
+
+                <section class="composer-wrap">
+                    <form id="composer" class="composer">
+                        <textarea
+                            id="composer-input"
+                            rows="1"
+                            maxlength="120000"
+                            placeholder="Message the agent…"
+                            data-i18n-placeholder="taskPlaceholder"
+                            aria-label="Task prompt"
+                        ></textarea>
+                        <div class="composer-footer">
+                            <div class="composer-context">
+                                <select id="composer-model" class="model-picker" aria-label="Task model"></select>
+                                <select id="composer-effort" class="effort-picker" aria-label="Reasoning effort"></select>
+                                <select id="composer-access" class="access-picker" aria-label="Permission mode"></select>
+                            </div>
+                            <button id="stop-turn" class="stop-button hidden" type="button" title="Stop task">
+                                <span aria-hidden="true"></span>
+                            </button>
+                            <button id="send-turn" class="send-button" type="submit" title="Send task">
+                                ↑
+                            </button>
+                        </div>
+                    </form>
+                    <p id="archived-thread-notice" class="archived-thread-notice hidden" data-i18n="archivedThreadReadOnly">
+                        Archived tasks are read-only. Restore this task to continue.
+                    </p>
+                    <p class="composer-hint" data-i18n="composerHint">Enter to send · Shift+Enter for a new line</p>
+                </section>
+
+                <section id="evaluation-workbench" class="evaluation-workbench hidden" aria-label="Skill evaluation workbench">
+                    <header class="evaluation-header">
+                        <div>
+                            <div class="drawer-eyebrow" data-i18n="evaluationWorkbench">SKILL EVALUATION WORKBENCH</div>
+                            <h1 data-i18n="evaluateSkills">Evaluate Skills against real language</h1>
+                            <p data-i18n="evaluationWorkbenchHelp">Keep questions verbatim, preflight the active runtime, and launch a test without forcing Skill activation.</p>
+                        </div>
+                        <button id="refresh-evaluation" type="button" data-i18n="refresh">Refresh</button>
+                    </header>
+                    <div class="evaluation-view-tabs" role="tablist">
+                        <button class="active" type="button" data-evaluation-view="cases" data-i18n="cases">Cases</button>
+                        <button type="button" data-evaluation-view="runs" data-i18n="evaluationRuns">Evaluation runs</button>
+                    </div>
+                    <div id="evaluation-cases-view" class="evaluation-grid">
+                        <aside class="evaluation-panel dataset-panel">
+                            <div class="evaluation-panel-head">
+                                <div>
+                                    <span class="panel-kicker" data-i18n="datasets">Datasets</span>
+                                    <strong id="evaluation-dataset-count">0</strong>
+                                </div>
+                                <button id="export-evaluation-dataset" class="evaluation-panel-action" type="button" data-i18n="exportCsv">Export CSV</button>
+                            </div>
+                            <form id="evaluation-create-dataset" class="evaluation-create-row dataset-create-form">
+                                <input id="evaluation-new-dataset-name" type="text" maxlength="100" data-i18n-placeholder="createDataset" placeholder="Create a new dataset" />
+                                <select id="evaluation-new-dataset-skill" required aria-label="Dataset Skill"></select>
+                                <button type="submit" title="Create dataset">＋</button>
+                            </form>
+                            <nav id="evaluation-dataset-list" class="evaluation-dataset-list"></nav>
+                        </aside>
+
+                        <section class="evaluation-panel case-panel">
+                            <div class="evaluation-panel-head">
+                                <div>
+                                    <span class="panel-kicker" data-i18n="cases">Cases</span>
+                                    <strong id="evaluation-case-count">0</strong>
+                                </div>
+                                <div class="evaluation-panel-head-actions">
+                                    <span data-i18n="verbatimQuestions">Questions stay verbatim</span>
+                                    <button id="open-case-refresh-batch" class="evaluation-panel-action" type="button" data-i18n="refreshCases">Refresh Cases</button>
+                                </div>
+                            </div>
+                            <div id="case-refresh-batch-status" class="refresh-batch-panel hidden" role="status"></div>
+                            <div id="evaluation-case-list" class="evaluation-case-list"></div>
+                        </section>
+
+                        <aside class="evaluation-panel launch-panel">
+                            <div class="evaluation-panel-head">
+                                <div>
+                                    <span class="panel-kicker" data-i18n="testRun">Test run</span>
+                                    <strong data-i18n="runtimePreflight">Runtime preflight</strong>
+                                </div>
+                            </div>
+                            <div class="dataset-skill-heading">
+                                <span data-i18n="datasetSkill">Dataset Skill</span>
+                                <button id="change-evaluation-dataset-skill" type="button" data-i18n="changeSkill">Change Skill</button>
+                            </div>
+                            <div id="evaluation-dataset-skill-status" class="skill-preflight"></div>
+                            <section class="dataset-rubric-card">
+                                <div class="dataset-rubric-heading">
+                                    <div>
+                                        <span data-i18n="datasetRubric">Dataset rubric</span>
+                                        <small data-i18n="datasetRubricHelp">Shared Skill-specific criteria inherited by every Case.</small>
+                                    </div>
+                                    <button id="manage-dataset-rubric" type="button" data-i18n="manageRubric">Manage</button>
+                                </div>
+                                <div id="evaluation-dataset-rubric-status" class="dataset-rubric-status"></div>
+                            </section>
+                            <fieldset class="activation-mode">
+                                <legend data-i18n="activationMode">Activation mode</legend>
+                                <label>
+                                    <input type="radio" name="activation-mode" value="automatic" checked />
+                                    <span><strong data-i18n="automaticTrigger">Automatic trigger</strong><small data-i18n="automaticTriggerHelp">Send only the original question. This is the scored path.</small></span>
+                                </label>
+                                <label>
+                                    <input type="radio" name="activation-mode" value="explicit" />
+                                    <span><strong data-i18n="explicitDiagnostic">Explicit diagnostic</strong><small data-i18n="explicitDiagnosticHelp">Attach a structured Skill mention to isolate trigger failures.</small></span>
+                                </label>
+                            </fieldset>
+                            <div class="settings-field">
+                                <span data-i18n="runtimeConfigurations">Runtime configurations</span>
+                                <div id="evaluation-runtime-list" class="evaluation-runtime-list"></div>
+                            </div>
+                            <fieldset class="evaluation-judge-configuration">
+                                <legend data-i18n="judgeConfiguration">Independent Judge</legend>
+                                <p data-i18n="judgeConfigurationHelp">Choose the runtime, model, and reasoning effort used only to grade saved answers and Trace evidence.</p>
+                                <label>
+                                    <span data-i18n="judgeRuntime">Judge runtime</span>
+                                    <select id="evaluation-judge-runtime"></select>
+                                </label>
+                                <div class="evaluation-judge-profile">
+                                    <label>
+                                        <span data-i18n="model">Model</span>
+                                        <select id="evaluation-judge-model"></select>
+                                    </label>
+                                    <label>
+                                        <span data-i18n="reasoningEffort">Reasoning effort</span>
+                                        <select id="evaluation-judge-effort"></select>
+                                    </label>
+                                </div>
+                                <p id="evaluation-judge-model-status" class="evaluation-judge-model-status" role="status"></p>
+                            </fieldset>
+                            <div class="evaluation-launch-actions">
+                                <button id="start-evaluation" type="button" data-i18n="startSelectedCase">Start selected case</button>
+                                <button id="start-dataset-evaluation" class="primary" type="button" data-i18n="startDataset">Run entire dataset</button>
+                            </div>
+                            <p class="evaluation-note" data-i18n="evaluationLaunchHelp">Selected runtimes execute in parallel. The independent Judge applies the published Skill rubric and computes one unified 100-point score.</p>
+                        </aside>
+                    </div>
+                    <section id="evaluation-runs" class="evaluation-runs hidden">
+                        <div class="evaluation-run-list-panel">
+                            <div class="evaluation-panel-head">
+                                <div><span class="panel-kicker" data-i18n="evaluationRuns">Evaluation runs</span><strong id="evaluation-run-count">0</strong></div>
+                            </div>
+                            <div id="evaluation-run-list" class="evaluation-run-list"></div>
+                        </div>
+                        <div id="evaluation-run-detail" class="evaluation-run-detail"></div>
+                    </section>
+                </section>
+
+                <section id="skill-management-workbench" class="skill-management-workbench hidden" aria-label="Skill management">
+                    <header class="skill-management-header">
+                        <div>
+                            <div class="drawer-eyebrow" data-i18n="skillRepositoryWorkbench">SKILL REPOSITORY WORKBENCH</div>
+                            <h1 data-i18n="managedSkillRepositories">Managed Skill repositories</h1>
+                            <p data-i18n="managedSkillHelp">Import editable repositories, review working changes, and release immutable Skill versions.</p>
+                        </div>
+                        <div class="skill-import-actions">
+                            <button type="button" data-import-skill="folder" data-i18n="importFolder">Import folder</button>
+                            <button type="button" data-import-skill="zip" data-i18n="importZip">Import ZIP</button>
+                            <button type="button" data-import-skill="local-git" data-i18n="importGitRepository">Import local Git</button>
+                            <button type="button" data-import-skill="git-url" data-i18n="cloneGitUrl">Clone Git URL</button>
+                            <button id="refresh-managed-skills" type="button" data-i18n="refresh">Refresh</button>
+                        </div>
+                    </header>
+                    <p id="managed-skill-error" class="managed-skill-error hidden" role="alert"></p>
+                    <div class="skill-management-grid">
+                        <aside class="managed-skill-panel managed-repository-panel">
+                            <div class="managed-skill-panel-head">
+                                <span data-i18n="managedRepositories">Repositories</span>
+                                <strong id="managed-repository-count">0</strong>
+                            </div>
+                            <nav id="managed-repository-list" class="managed-repository-list"></nav>
+                        </aside>
+                        <section id="managed-skill-detail" class="managed-skill-panel managed-skill-detail"></section>
+                        <aside class="managed-skill-panel managed-skill-side-panel">
+                            <div id="managed-skill-side-tabs" class="managed-skill-side-tabs" role="tablist">
+                                <button class="active" type="button" role="tab" aria-selected="true" data-managed-skill-side-view="versions" data-i18n="managedVersions">Versions</button>
+                                <button type="button" role="tab" aria-selected="false" data-managed-skill-side-view="installations" data-i18n="runtimeInstallations">Runtime installs</button>
+                            </div>
+                            <div id="managed-skill-versions" class="managed-skill-versions"></div>
+                            <div id="managed-skill-installations" class="managed-skill-installations hidden">
+                                <label class="managed-install-field">
+                                    <span data-i18n="releasedVersion">Released version</span>
+                                    <select id="managed-install-version"></select>
+                                </label>
+                                <div id="managed-install-runtime-list" class="managed-install-runtime-list"></div>
+                                <button id="start-managed-skill-installations" class="primary managed-install-start" type="button" data-i18n="installWithRuntimes">Install with selected runtimes</button>
+                                <div class="managed-install-section-head" data-i18n="installationJobs">Installation jobs</div>
+                                <div id="managed-install-job-list" class="managed-install-job-list"></div>
+                                <section id="managed-install-session" class="managed-install-session"></section>
+                                <div class="managed-install-session-actions">
+                                    <button id="retry-managed-skill-installation" class="hidden" type="button" data-i18n="retryInstallation">Retry installation</button>
+                                    <button id="inspect-managed-skill-installation" class="hidden" type="button" data-i18n="inspectInstallation">Inspect read-only</button>
+                                    <button id="cancel-managed-skill-installation" class="stop-button managed-install-stop hidden" type="button" title="Stop installation"><span aria-hidden="true"></span></button>
+                                </div>
+                            </div>
+                        </aside>
+                    </div>
+                </section>
+
+                <section id="operator-workbench" class="operator-workbench hidden" aria-label="Operator self-operation" data-i18n-aria-label="operatorWorkbenchAria">
+                    <header class="operator-workbench-header">
+                        <div>
+                            <div class="drawer-eyebrow" data-i18n="operatorWorkbenchAria">SELF-OPERATION WORKBENCH</div>
+                            <h1 data-i18n="operatorWorkbenchTitle">Run scoped self-operation Jobs</h1>
+                            <p data-i18n="operatorWorkbenchHelp">Configure Runtime, scope, and hard budgets for durable local Agent work.</p>
+                        </div>
+                    </header>
+                    <div class="operator-grid">
+                    <aside class="operator-job-panel">
+                        <header class="operator-panel-header">
+                            <div>
+                                <span class="panel-kicker" data-i18n="operator">Self-operation</span>
+                                <strong data-i18n="operatorJobs">Jobs</strong>
+                            </div>
+                            <div class="operator-panel-actions">
+                                <button id="operator-manage-jobs" type="button" data-i18n="operatorManageJobs">Manage</button>
+                                <button id="operator-new-job" class="primary" type="button" data-i18n="operatorNewJob">New Job</button>
+                            </div>
+                        </header>
+                        <div id="operator-job-bulk-actions" class="operator-job-bulk-actions hidden">
+                            <button id="operator-select-all-jobs" type="button" data-i18n="operatorSelectAllFinished">Select finished</button>
+                            <button id="operator-delete-selected-jobs" type="button">Delete selected</button>
+                            <button id="operator-cancel-job-management" type="button" data-i18n="operatorCancelManagement">Cancel</button>
+                        </div>
+                        <nav id="operator-job-list" class="operator-job-list" aria-label="Operator Jobs" data-i18n-aria-label="operatorJobs"></nav>
+                    </aside>
+
+                    <section class="operator-session-panel">
+                        <form id="operator-setup-form" class="operator-setup-form hidden">
+                            <div id="operator-setup-scroll" class="operator-setup-scroll">
+                            <header class="operator-setup-hero">
+                                <div class="operator-setup-hero-copy">
+                                    <span class="panel-kicker" data-i18n="operatorScopedSession">Scoped session</span>
+                                    <h1 data-i18n="operatorStartSelfOperation">Start self-operation</h1>
+                                    <p data-i18n="operatorStartHelp">Choose the Runtime, authority, and scope for this durable Job.</p>
+                                </div>
+                                <label class="operator-field operator-job-kind-field operator-hero-control">
+                                    <span data-i18n="operatorTaskType">Task type</span>
+                                    <select id="operator-job-kind">
+                                        <option value="operator" data-i18n="operatorJobType">Operator Job</option>
+                                        <option value="optimization" data-i18n="operatorOptimizationType">Multi-Epoch Skill optimization</option>
+                                    </select>
+                                </label>
+                            </header>
+                            <label class="operator-field operator-objective-field">
+                                <span id="operator-objective-label" data-i18n="operatorObjective">Objective</span>
+                                <textarea name="objective" rows="3" maxlength="32768" required placeholder="Describe the bounded outcome…" data-i18n-placeholder="operatorObjectivePlaceholder" aria-labelledby="operator-objective-label" aria-describedby="operator-objective-help"></textarea>
+                                <small id="operator-objective-help" class="operator-field-help hidden"></small>
+                            </label>
+                            <section class="operator-setup-section operator-environment-section">
+                                <h2 data-i18n="operatorEnvironment">Run environment</h2>
+                                <article class="operator-primary-runtime-card evaluation-runtime-row">
+                                    <div class="operator-primary-runtime-heading evaluation-runtime-heading">
+                                        <span>
+                                            <strong id="operator-runtime-name">Runtime</strong>
+                                            <small id="operator-runtime-detail"></small>
+                                        </span>
+                                    </div>
+                                    <div class="operator-primary-runtime-controls evaluation-runtime-controls">
+                                        <label class="operator-primary-runtime-control">
+                                            <span data-i18n="operatorRuntime">Operator Runtime</span>
+                                            <select id="operator-runtime" required></select>
+                                        </label>
+                                        <label class="operator-primary-runtime-control">
+                                            <span data-i18n="model">Model</span>
+                                            <select id="operator-model"></select>
+                                        </label>
+                                        <label class="operator-primary-runtime-control">
+                                            <span data-i18n="reasoningEffort">Reasoning effort</span>
+                                            <select id="operator-effort"></select>
+                                        </label>
+                                    </div>
+                                </article>
+                            </section>
+                            <section class="operator-setup-section operator-resource-section">
+                                <h2 data-i18n="operatorResources">Resources and scope</h2>
+                                <div class="operator-setup-row two">
+                                    <label class="operator-field">
+                                        <span id="operator-managed-skill-label" data-i18n="operatorManagedSkillOptional">Managed Skill · optional</span>
+                                        <select id="operator-managed-skill"></select>
+                                    </label>
+                                    <label class="operator-field">
+                                        <span id="operator-managed-dataset-label" data-i18n="operatorDatasetOptional">Dataset · optional</span>
+                                        <select id="operator-managed-dataset"></select>
+                                    </label>
+                                </div>
+                                <fieldset class="operator-fieldset operator-target-fieldset">
+                                    <legend data-i18n="operatorAllowedTargets">Allowed target Runtimes</legend>
+                                    <div id="operator-target-runtimes" class="operator-check-grid"></div>
+                                </fieldset>
+                            </section>
+                            <section id="operator-optimization-fields" class="operator-optimization-fields hidden">
+                                <div class="operator-optimization-grid">
+                                    <label class="operator-field">
+                                        <span data-i18n="operatorReleasedBaseline">Released baseline</span>
+                                        <select id="operator-optimization-baseline"></select>
+                                    </label>
+                                    <label class="operator-field">
+                                        <span data-i18n="operatorJudgeRuntime">Judge Runtime</span>
+                                        <select id="operator-optimization-judge-runtime"></select>
+                                    </label>
+                                    <label class="operator-field">
+                                        <span data-i18n="operatorJudgeModel">Judge model</span>
+                                        <select id="operator-optimization-judge-model"></select>
+                                    </label>
+                                    <label class="operator-field">
+                                        <span data-i18n="operatorJudgeEffort">Judge effort</span>
+                                        <select id="operator-optimization-judge-effort"></select>
+                                    </label>
+                                    <label class="operator-field">
+                                        <span data-i18n="activationMode">Activation</span>
+                                        <select id="operator-optimization-activation">
+                                            <option value="automatic" data-i18n="operatorAutomatic">Automatic</option>
+                                            <option value="explicit" data-i18n="operatorExplicit">Explicit</option>
+                                        </select>
+                                    </label>
+                                </div>
+                                <fieldset class="operator-fieldset operator-epoch-boundary">
+                                    <legend data-i18n="operatorEpochBoundary">Closed-loop boundary</legend>
+                                    <label class="operator-field">
+                                        <span data-i18n="operatorMaxEpochs">Maximum closed-loop Epochs</span>
+                                        <input type="number" min="1" step="1" value="5" data-optimization-limit="maxEpochs" required />
+                                    </label>
+                                    <p class="operator-help" data-i18n="operatorEpochBoundaryHelp">One Epoch includes improving the Skill, installing the Candidate, running the complete evaluation, and reviewing the result. Agent operations inside the Epoch are unlimited.</p>
+                                    <label class="operator-check"><input type="checkbox" data-optimization-search />随机反馈多候选搜索 / Sampled candidate search</label>
+                                    <label class="operator-field">每组候选数 / Candidates per round<input type="number" min="1" max="8" value="3" data-search-candidates /></label>
+                                    <label class="operator-field">每候选失败样本数 / Failure samples<input type="number" min="1" max="24" value="6" data-search-samples /></label>
+                                    <label class="operator-field">每 Runtime 并发 Case 数 / Case workers<input type="number" min="1" max="8" value="1" data-search-workers /></label>
+                                    <p class="operator-help">最大 Epoch 是候选总预算，不乘以每组候选数。并发默认关闭；启用前需确认业务数据可隔离、Skill 可从 Case 子目录自动发现。</p>
+                                </fieldset>
+                            </section>
+                            <details id="operator-automation-boundary" class="operator-setup-details">
+                                <summary data-i18n="operatorAutomationBoundary">Automation boundary</summary>
+                                <p class="operator-help" data-i18n="operatorAutomaticAuthorityHelp">Normal work inside the selected scope can run, evaluate, publish, and install automatically. Every action remains audited.</p>
+                                <div class="operator-boundary-grid">
+                                    <label class="operator-check">
+                                        <input type="checkbox" data-operator-risk="datasets.delete" />
+                                        <span data-i18n="operatorAllowPermanentDelete">Allow permanent Dataset or Case deletion</span>
+                                    </label>
+                                </div>
+                            </details>
+                            <p id="operator-setup-error" class="operator-error hidden" role="alert"></p>
+                            </div>
+                            <div class="operator-setup-actions operator-setup-footer">
+                                <button id="operator-generic-start" class="primary" type="submit" data-i18n="operatorStartJob">Start Operator Job</button>
+                                <button id="operator-optimization-start" class="primary hidden" type="submit" data-i18n="operatorStartOptimization">Start Optimization</button>
+                            </div>
+                        </form>
+
+                        <header id="operator-session-header" class="operator-session-header hidden">
+                            <div>
+                                <span id="operator-session-state" class="operator-state-pill"></span>
+                                <h1 id="operator-session-title" data-i18n="operatorJobTitle">Operator Job</h1>
+                            </div>
+                            <div id="operator-session-actions" class="operator-session-actions"></div>
+                        </header>
+                        <div id="operator-transcript" class="operator-transcript" aria-live="polite"></div>
+                        <div class="operator-composer-wrap">
+                            <form id="operator-composer" class="operator-composer hidden">
+                                <textarea id="operator-composer-input" rows="2" maxlength="32768" aria-label="Operator message" placeholder="Message this Operator session…" data-i18n-aria-label="operatorMessageAria" data-i18n-placeholder="operatorMessagePlaceholder"></textarea>
+                                <button id="operator-composer-send" class="operator-action-button primary" type="submit" data-i18n="send">Send</button>
+                            </form>
+                        </div>
+                    </section>
+
+                    <aside id="operator-status-panel" class="operator-status-panel">
+                        <section id="operator-optimization-panel" class="operator-side-section hidden">
+                            <div class="operator-optimization-summary-head">
+                                <div>
+                                    <span class="panel-kicker" data-i18n="operatorOptimizationProgress">Optimization progress</span>
+                                    <strong id="operator-optimization-phase"></strong>
+                                </div>
+                                <span id="operator-optimization-progress" class="operator-optimization-progress"></span>
+                            </div>
+                            <p id="operator-optimization-status-copy" class="operator-compact-copy"></p>
+                            <p id="operator-optimization-direction-summary" class="operator-optimization-direction-summary"></p>
+                            <div id="operator-optimization-flow" class="operator-optimization-flow" role="tree" aria-label="Optimization flow" data-i18n-aria-label="operatorOptimizationFlow"></div>
+                            <div id="operator-optimization-result" class="operator-optimization-result"></div>
+                            <div id="operator-optimization-decision" class="operator-optimization-decision hidden" role="status"></div>
+                            <div id="operator-optimization-recovery" class="operator-optimization-recovery"></div>
+                            <p id="operator-optimization-stop-warning" class="operator-optimization-stop-warning hidden" data-i18n="operatorStopWarning">Stopping cancels queued work, interrupts current work, and restores Runtime Skills.</p>
+                            <div id="operator-optimization-actions" class="operator-inline-actions"></div>
+                        </section>
+                        <section id="operator-approval-section" class="operator-side-section approval-section hidden">
+                            <h2 data-i18n="operatorApprovalQueue">Approval queue</h2>
+                            <div id="operator-approval-queue" class="operator-side-list"></div>
+                        </section>
+                        <details id="operator-technical-details" class="operator-technical-details">
+                            <summary data-i18n="operatorTechnicalDetails">Technical details</summary>
+                            <div class="operator-technical-body">
+                                <section id="operator-optimization-frozen-section" class="hidden">
+                                    <h3 data-i18n="operatorFrozenInputs">Frozen inputs</h3>
+                                    <div id="operator-optimization-frozen" class="operator-compact-copy"></div>
+                                </section>
+                                <section id="operator-optimization-timeline-section" class="hidden">
+                                    <h3 data-i18n="operatorEpochHistory">Epoch evaluation history</h3>
+                                    <div id="operator-optimization-timeline" class="operator-optimization-timeline"></div>
+                                </section>
+                                <section id="operator-optimization-installations-section" class="hidden">
+                                    <h3 data-i18n="operatorInstallationDetails">Runtime installations</h3>
+                                    <div id="operator-optimization-installations" class="operator-side-list"></div>
+                                </section>
+                                <section id="operator-optimization-internal-section" class="hidden">
+                                    <h3 data-i18n="operatorInternalState">Internal state</h3>
+                                    <div id="operator-optimization-budget" class="operator-compact-copy"></div>
+                                </section>
+                                <section id="operator-scope-section">
+                                    <h3 data-i18n="operatorScope">Scope</h3>
+                                    <p id="operator-scope" class="operator-compact-copy" data-i18n="operatorNoScope">No scope selected</p>
+                                </section>
+                                <section id="operator-budget-section">
+                                    <h3 data-i18n="operatorBudget">Budget</h3>
+                                    <p id="operator-budget" class="operator-compact-copy" data-i18n="operatorNoBudget">No budget details</p>
+                                </section>
+                                <section id="operator-child-jobs-section">
+                                    <h3 data-i18n="operatorChildJobs">Child Jobs</h3>
+                                    <div id="operator-child-jobs" class="operator-side-list"></div>
+                                </section>
+                                <section id="operator-artifacts-section">
+                                    <h3 data-i18n="operatorArtifacts">Artifacts</h3>
+                                    <div id="operator-artifacts" class="operator-side-list"></div>
+                                </section>
+                            </div>
+                        </details>
+                    </aside>
+                    </div>
+                </section>
+            </main>
+
+            <aside id="raw-case-panel" class="raw-case-panel visible" aria-label="Raw Case inbox">
+                <header class="drawer-header raw-case-header">
+                    <div>
+                        <div class="drawer-eyebrow" data-i18n="rawCaseInbox">RAW CASE INBOX</div>
+                        <h2 data-i18n="rawCases">Raw Cases</h2>
+                    </div>
+                    <button id="close-raw-cases" class="icon-button large" type="button" title="Close Raw Cases">×</button>
+                </header>
+                <form id="raw-case-form" class="raw-case-form">
+                    <label>
+                        <span data-i18n="skill">Skill</span>
+                        <input id="raw-case-skill" type="text" maxlength="200" list="raw-case-skill-options" required data-i18n-placeholder="rawCaseSkillPlaceholder" placeholder="Skill name" />
+                        <datalist id="raw-case-skill-options"></datalist>
+                    </label>
+                    <label>
+                        <span data-i18n="rawCaseQuestion">Question</span>
+                        <textarea id="raw-case-question" rows="3" maxlength="120000" required data-i18n-placeholder="rawCaseQuestionPlaceholder" placeholder="Save an unverified question…"></textarea>
+                    </label>
+                    <label>
+                        <span data-i18n="noteOptional">Note · optional</span>
+                        <input id="raw-case-note" type="text" maxlength="10000" data-i18n-placeholder="rawCaseNotePlaceholder" placeholder="Why keep this case?" />
+                    </label>
+                    <div class="raw-case-form-actions">
+                        <button id="cancel-raw-case-edit" class="hidden" type="button" data-i18n="cancel">Cancel</button>
+                        <button id="add-raw-case" class="primary" type="submit" data-i18n="addToInbox">Add to inbox</button>
+                    </div>
+                </form>
+                <div id="raw-case-list" class="raw-case-list"></div>
+            </aside>
+
+            <aside id="trace-drawer" class="trace-drawer" aria-label="Local trace">
+                <header class="drawer-header">
+                    <div>
+                        <div class="drawer-eyebrow" data-i18n="localEvidence">LOCAL EVIDENCE</div>
+                        <h2 data-i18n="runtimeTrace">Runtime trace</h2>
+                    </div>
+                    <button id="close-trace" class="icon-button large" type="button" title="Close trace">×</button>
+                </header>
+                <div class="trace-toolbar">
+                    <button id="refresh-trace" type="button" data-i18n="refresh">Refresh</button>
+                    <button id="open-trace-folder" type="button" data-i18n="openFolder">Open folder</button>
+                </div>
+                <div id="trace-meta" class="trace-meta" data-i18n="traceInitial">Trace begins when the local runtime starts.</div>
+                <div id="trace-events" class="trace-events"></div>
+            </aside>
+
+            <aside id="curation-drawer" class="right-drawer curation-drawer" aria-label="Case drafts">
+                <header class="drawer-header">
+                    <div>
+                        <div class="drawer-eyebrow" data-i18n="curatorTasks">CURATOR TASKS</div>
+                        <h2 data-i18n="caseDrafts">Case drafts</h2>
+                    </div>
+                    <button id="close-curations" class="icon-button large" type="button" title="Close case drafts">×</button>
+                </header>
+                <nav id="curation-list" class="curation-list" aria-label="Curation sessions"></nav>
+                <section id="curation-detail" class="curation-detail">
+                    <div class="sidebar-placeholder" data-i18n="selectDraft">Select a case draft to review it.</div>
+                </section>
+            </aside>
+
+            <aside id="rubric-drawer" class="right-drawer rubric-drawer" aria-label="Dataset rubric agent">
+                <header class="drawer-header">
+                    <div>
+                        <div class="drawer-eyebrow" data-i18n="rubricAgentTask">RUBRIC AGENT</div>
+                        <h2 data-i18n="datasetRubric">Dataset rubric</h2>
+                    </div>
+                    <button id="close-rubric-drawer" class="icon-button large" type="button" title="Close rubric agent">×</button>
+                </header>
+                <nav id="rubric-version-list" class="rubric-version-list" aria-label="Rubric versions"></nav>
+                <section id="rubric-detail" class="rubric-detail">
+                    <div class="sidebar-placeholder" data-i18n="rubricNotPublished">No rubric has been published for this dataset.</div>
+                </section>
+            </aside>
+        </div>
+
+        <dialog id="runtime-dialog" class="case-dialog runtime-dialog">
+            <div class="runtime-dialog-body">
+                <div class="dialog-header">
+                    <div>
+                        <div class="drawer-eyebrow" data-i18n="localProviders">LOCAL PROVIDERS</div>
+                        <h2 data-i18n="agentRuntimes">Agent runtimes</h2>
+                    </div>
+                    <button id="close-runtime-dialog" class="icon-button large" type="button">×</button>
+                </div>
+                <p class="runtime-dialog-copy" data-i18n="runtimeDialogCopy">
+                    Compatible runtimes are discovered locally and are not installed or upgraded by Rolling Skill.
+                </p>
+                <div id="runtime-options" class="runtime-options"></div>
+                <div class="runtime-dialog-actions">
+                    <button id="detect-runtimes" type="button" data-i18n="rescan">Rescan</button>
+                    <button id="automatic-runtime" type="button" data-i18n="automaticRuntime">Use automatic selection</button>
+                    <button id="choose-runtime-file" type="button" data-i18n="addExecutable">Add executable…</button>
+                    <button id="confirm-runtime" class="primary" type="button" data-i18n="done">Done</button>
+                </div>
+            </div>
+        </dialog>
+
+        <dialog id="settings-dialog" class="case-dialog settings-dialog">
+            <form id="settings-form">
+                <div class="settings-dialog-body">
+                    <div class="dialog-header">
+                        <div>
+                            <div class="drawer-eyebrow">ROLLING SKILL</div>
+                            <h2 data-i18n="settings">Settings</h2>
+                        </div>
+                        <button id="close-settings-dialog" class="icon-button large" type="button">×</button>
+                    </div>
+
+                <section class="settings-section">
+                    <h3 data-i18n="appearance">Appearance</h3>
+                    <div class="settings-grid">
+                        <label class="settings-field">
+                            <span data-i18n="language">Language</span>
+                            <select id="settings-language">
+                                <option value="zh-CN">简体中文</option>
+                                <option value="en">English</option>
+                            </select>
+                        </label>
+                        <label class="settings-field">
+                            <span data-i18n="theme">Theme</span>
+                            <select id="settings-theme">
+                                <option value="codex-light">Codex Light</option>
+                                <option value="codex-dark">Codex Dark</option>
+                                <option value="graphite">Graphite</option>
+                            </select>
+                        </label>
+                    </div>
+                </section>
+
+                <section class="settings-section">
+                    <h3 data-i18n="models">Models</h3>
+                    <div class="settings-grid">
+                        <label class="settings-field">
+                            <span data-i18n="taskModel">New task model</span>
+                            <select id="settings-task-model"></select>
+                        </label>
+                        <label class="settings-field">
+                            <span data-i18n="reasoningEffort">Reasoning effort</span>
+                            <select id="settings-task-effort"></select>
+                        </label>
+                        <label class="settings-field">
+                            <span data-i18n="curatorModel">Default Curator model</span>
+                            <select id="settings-curator-model"></select>
+                        </label>
+                        <label class="settings-field">
+                            <span data-i18n="reasoningEffort">Reasoning effort</span>
+                            <select id="settings-curator-effort"></select>
+                        </label>
+                        <label class="settings-field">
+                            <span data-i18n="rubricModel">Default Rubric Agent model</span>
+                            <select id="settings-rubric-model"></select>
+                        </label>
+                        <label class="settings-field">
+                            <span data-i18n="reasoningEffort">Reasoning effort</span>
+                            <select id="settings-rubric-effort"></select>
+                        </label>
+                        <label class="settings-field">
+                            <span data-i18n="judgeModel">Default Judge model</span>
+                            <select id="settings-judge-model"></select>
+                        </label>
+                        <label class="settings-field">
+                            <span data-i18n="reasoningEffort">Reasoning effort</span>
+                            <select id="settings-judge-effort"></select>
+                        </label>
+                    </div>
+                </section>
+
+                <section class="settings-section">
+                    <h3 data-i18n="localRuntimeAndData">Local runtime & data</h3>
+                    <p class="settings-section-copy" data-i18n="localRuntimeAndDataHelp">Runtime discovery, raw trace, and the local evaluation store stay on this Mac.</p>
+                    <div class="settings-workspace-path">
+                        <span data-i18n="workspace">Workspace</span>
+                        <code id="settings-workspace-path"></code>
+                    </div>
+                    <label class="settings-field">
+                        <span data-i18n="localAccess">Codex new conversation default</span>
+                        <select id="settings-local-access">
+                            <option value="full" data-i18n="fullLocalAccess">Full local access</option>
+                            <option value="workspace" data-i18n="workspaceOnlyAccess">Workspace only</option>
+                        </select>
+                        <small id="settings-local-access-help" data-i18n="localAccessHelp">Default permission for new Codex conversations. Each conversation can override it from the task composer.</small>
+                    </label>
+                    <div class="settings-utility-row">
+                        <button id="choose-runtime" type="button" data-i18n="runtime">Runtime…</button>
+                        <button id="open-trace" type="button" data-i18n="trace">Trace</button>
+                        <button id="show-local-data" type="button" data-i18n="openDatasetFile">Open dataset file</button>
+                    </div>
+                    <button id="archived-curations" class="settings-disclosure" type="button" data-i18n="archivedDrafts">Archived Case drafts</button>
+                    <div id="archived-curation-list" class="archived-curation-list hidden"></div>
+                </section>
+
+                <section class="settings-section automatic-capture-settings">
+                    <div class="settings-section-heading">
+                        <div>
+                            <h3 data-i18n="automaticCapture">Automatic capture</h3>
+                            <p data-i18n="automaticCaptureHelp">Scan new conversations on a daily or weekly schedule. Scheduled mode keeps candidates in Raw Cases; fully automatic mode saves only candidates that pass every gate.</p>
+                        </div>
+                    </div>
+                    <div class="automatic-capture-status" role="status">
+                        <span class="capture-dot" aria-hidden="true"></span>
+                        <div>
+                            <strong id="settings-auto-capture-status" data-i18n="autoCaptureOff">Automatic capture is off</strong>
+                            <small id="settings-auto-capture-last-success" data-i18n="autoCaptureNeverRun">No successful scan yet</small>
+                        </div>
+                    </div>
+                    <div class="settings-grid">
+                        <label class="settings-field">
+                            <span data-i18n="captureMode">Mode</span>
+                            <select id="settings-auto-capture-mode">
+                                <option value="off" data-i18n="autoCaptureModeOff">Off</option>
+                                <option value="scheduled" data-i18n="autoCaptureScheduled">Scheduled · keep in Raw Cases</option>
+                                <option value="automatic" data-i18n="autoCaptureAutomatic">Fully automatic · save gated Cases</option>
+                            </select>
+                        </label>
+                        <label class="settings-field">
+                            <span data-i18n="captureModel">Analysis model</span>
+                            <select id="settings-auto-capture-model"></select>
+                        </label>
+                    </div>
+                    <div id="settings-auto-capture-schedule" class="settings-grid automatic-capture-schedule">
+                        <label class="settings-field">
+                            <span data-i18n="captureCadence">Cadence</span>
+                            <select id="settings-auto-capture-cadence">
+                                <option value="daily" data-i18n="captureDaily">Daily</option>
+                                <option value="weekly" data-i18n="captureWeekly">Weekly</option>
+                            </select>
+                        </label>
+                        <label class="settings-field">
+                            <span data-i18n="captureTime">Local time</span>
+                            <input id="settings-auto-capture-time" type="time" step="60" />
+                        </label>
+                    </div>
+                    <div class="settings-grid">
+                        <label id="settings-auto-capture-weekday-field" class="settings-field">
+                            <span data-i18n="captureWeekday">Weekday</span>
+                            <select id="settings-auto-capture-weekday">
+                                <option value="1" data-i18n="weekdayMonday">Monday</option>
+                                <option value="2" data-i18n="weekdayTuesday">Tuesday</option>
+                                <option value="3" data-i18n="weekdayWednesday">Wednesday</option>
+                                <option value="4" data-i18n="weekdayThursday">Thursday</option>
+                                <option value="5" data-i18n="weekdayFriday">Friday</option>
+                                <option value="6" data-i18n="weekdaySaturday">Saturday</option>
+                                <option value="0" data-i18n="weekdaySunday">Sunday</option>
+                            </select>
+                        </label>
+                        <label class="settings-field">
+                            <span data-i18n="reasoningEffort">Reasoning effort</span>
+                            <select id="settings-auto-capture-effort"></select>
+                        </label>
+                    </div>
+                    <fieldset id="settings-auto-capture-targets" class="automatic-capture-targets">
+                        <legend data-i18n="candidateSkills">Candidate Skills and datasets</legend>
+                        <p data-i18n="candidateSkillsDescription">Only checked managed Skills are analyzed. Each matched Case is sent to the dataset selected on that row.</p>
+                        <div id="settings-auto-capture-target-list" class="automatic-capture-target-list"></div>
+                        <p id="settings-auto-capture-target-error" class="automatic-capture-target-error hidden" role="alert" data-i18n="automaticTargetsRequired">Select at least one available Skill and target dataset while automatic capture is enabled.</p>
+                    </fieldset>
+                </section>
+                </div>
+
+                <div class="dialog-footer settings-actions">
+                    <span data-i18n="settingsLocalOnly">Settings stay on this Mac.</span>
+                    <button id="cancel-settings" type="button" data-i18n="cancel">Cancel</button>
+                    <button id="save-settings" class="primary" type="submit" data-i18n="save">Save</button>
+                </div>
+            </form>
+        </dialog>
+
+        <dialog id="delete-case-dialog" class="case-dialog confirm-dialog">
+            <div class="confirm-dialog-body">
+                <div class="dialog-header">
+                    <div><div class="drawer-eyebrow">DATASET CASE</div><h2 data-i18n="deleteCase">Delete Case?</h2></div>
+                    <button id="close-delete-case-dialog" class="icon-button large" type="button">×</button>
+                </div>
+                <p data-i18n="deleteCaseHelp">The Case will be removed from the dataset. Existing run snapshots stay available.</p>
+                <label class="confirm-preserve-option">
+                    <input id="recover-deleted-case-question" type="checkbox" checked />
+                    <span>
+                        <strong data-i18n="recoverDeleteQuestions">Preserve questions in Raw Cases</strong>
+                        <small data-i18n="recoverDeleteCaseHelp">Only the question, Skill, type, and source are preserved. The answer is not copied.</small>
+                    </span>
+                </label>
+                <p id="delete-case-error" class="confirm-dialog-error hidden" role="alert"></p>
+                <div class="dialog-footer">
+                    <span></span>
+                    <button id="cancel-delete-case" type="button" data-i18n="cancel">Cancel</button>
+                    <button id="confirm-delete-case" class="danger" type="button" data-i18n="delete">Delete</button>
+                </div>
+            </div>
+        </dialog>
+
+        <dialog id="delete-dataset-dialog" class="case-dialog confirm-dialog">
+            <div class="confirm-dialog-body">
+                <div class="dialog-header">
+                    <div><div class="drawer-eyebrow">DATASET</div><h2 data-i18n="deleteDataset">Delete dataset?</h2></div>
+                    <button id="close-delete-dataset-dialog" class="icon-button large" type="button" data-i18n-title="close" data-i18n-aria-label="close" title="Close" aria-label="Close">×</button>
+                </div>
+                <p data-i18n="deleteDatasetHelp">All Cases and finished draft records in this dataset will be removed. Unfinished drafts block deletion; evaluation records keep their snapshots.</p>
+                <label class="confirm-preserve-option">
+                    <input id="recover-deleted-dataset-questions" type="checkbox" checked />
+                    <span>
+                        <strong data-i18n="recoverDeleteQuestions">Preserve questions in Raw Cases</strong>
+                        <small id="recover-deleted-dataset-count">0 questions will be preserved. Answers are not copied.</small>
+                    </span>
+                </label>
+                <p id="delete-dataset-error" class="confirm-dialog-error hidden" role="alert"></p>
+                <div class="dialog-footer">
+                    <span></span>
+                    <button id="cancel-delete-dataset" type="button" data-i18n="cancel">Cancel</button>
+                    <button id="confirm-delete-dataset" class="danger" type="button" data-i18n="delete">Delete</button>
+                </div>
+            </div>
+        </dialog>
+
+        <dialog id="delete-evaluation-run-dialog" class="case-dialog confirm-dialog">
+            <div class="confirm-dialog-body">
+                <div class="dialog-header">
+                    <div><div class="drawer-eyebrow">EVALUATION RUN</div><h2 data-i18n="deleteEvaluationRun">Delete evaluation record?</h2></div>
+                    <button id="close-delete-evaluation-run-dialog" class="icon-button large" type="button" data-i18n-title="close" data-i18n-aria-label="close" title="Close" aria-label="Close">×</button>
+                </div>
+                <p data-i18n="deleteEvaluationRunHelp">This saved run, its results, and embedded snapshots will be permanently removed. Trace files are not deleted.</p>
+                <p id="delete-evaluation-run-error" class="confirm-dialog-error hidden" role="alert"></p>
+                <div class="dialog-footer">
+                    <span></span>
+                    <button id="cancel-delete-evaluation-run" type="button" data-i18n="cancel">Cancel</button>
+                    <button id="confirm-delete-evaluation-run" class="danger" type="button" data-i18n="delete">Delete</button>
+                </div>
+            </div>
+        </dialog>
+
+        <dialog id="cancel-evaluation-run-dialog" class="case-dialog confirm-dialog">
+            <div class="confirm-dialog-body">
+                <div class="dialog-header">
+                    <div><div class="drawer-eyebrow">EVALUATION RUN</div><h2 data-i18n="cancelEvaluationRun">Stop evaluation?</h2></div>
+                    <button id="close-cancel-evaluation-run-dialog" class="icon-button large" type="button" data-i18n-title="close" data-i18n-aria-label="close" title="Close" aria-label="Close">×</button>
+                </div>
+                <p data-i18n="cancelEvaluationRunHelp">Running target or Judge turns will be interrupted and queued Cases will not start. Completed answers and Trace evidence stay in this record.</p>
+                <p id="cancel-evaluation-run-error" class="confirm-dialog-error hidden" role="alert"></p>
+                <div class="dialog-footer">
+                    <span></span>
+                    <button id="dismiss-cancel-evaluation-run" type="button" data-i18n="keepRunning">Keep running</button>
+                    <button id="confirm-cancel-evaluation-run" class="danger" type="button" data-i18n="stopEvaluation">Stop evaluation</button>
+                </div>
+            </div>
+        </dialog>
+
+        <dialog id="export-dataset-dialog" class="case-dialog confirm-dialog">
+            <form id="export-dataset-form" class="confirm-dialog-body">
+                <div class="dialog-header">
+                    <div>
+                        <div class="drawer-eyebrow">DATASET CSV</div>
+                        <h2 data-i18n="exportDataset">Export dataset</h2>
+                    </div>
+                    <button id="close-export-dataset-dialog" class="icon-button large" type="button" data-i18n-title="close" data-i18n-aria-label="close" title="Close" aria-label="Close">×</button>
+                </div>
+                <label class="field">
+                    <span data-i18n="exportCaseScope">Cases to export</span>
+                    <select id="export-case-scope">
+                        <option value="all" data-i18n="allCases">All Cases</option>
+                        <option value="goodcase" data-i18n="goodCasesOnly">Good Cases only</option>
+                    </select>
+                </label>
+                <label class="field">
+                    <span data-i18n="exportOutputMode">Output column</span>
+                    <select id="export-output-mode">
+                        <option value="curated" data-i18n="curatedReferenceOutput">Curated reference answer</option>
+                        <option value="original" data-i18n="originalAssistantOutput">Original final Assistant answer</option>
+                    </select>
+                    <small class="field-help" data-i18n="originalAssistantOutputHelp">Original output keeps only the last Assistant answer in the frozen Case episode; intermediate messages and tool output are excluded.</small>
+                </label>
+                <div class="dialog-footer">
+                    <span></span>
+                    <button id="cancel-export-dataset" type="button" data-i18n="cancel">Cancel</button>
+                    <button id="confirm-export-dataset" class="primary" type="submit" data-i18n="exportCsv">Export CSV</button>
+                </div>
+            </form>
+        </dialog>
+
+        <dialog id="case-refresh-batch-dialog" class="case-dialog confirm-dialog">
+            <form id="case-refresh-batch-form" class="confirm-dialog-body">
+                <div class="dialog-header">
+                    <div>
+                        <div class="drawer-eyebrow" data-i18n="caseRefresh">CASE REFRESH</div>
+                        <h2 data-i18n="refreshBatchTitle">Refresh saved Cases?</h2>
+                    </div>
+                    <button id="close-case-refresh-batch-dialog" class="icon-button large" type="button" data-i18n-title="close" data-i18n-aria-label="close" title="Close" aria-label="Close">×</button>
+                </div>
+                <p data-i18n="refreshBatchHelp">Each selected Case is rerun in order with the current Skill and tools, then saved automatically after the refreshed draft passes validation.</p>
+                <fieldset class="refresh-scope-options">
+                    <legend data-i18n="refreshScope">Cases to refresh</legend>
+                    <label>
+                        <input type="radio" name="case-refresh-scope" value="goodcase" checked />
+                        <span><strong data-i18n="goodCasesOnly">Good Cases only</strong><small data-i18n="refreshGoodcaseHelp">Refresh trusted reference Cases and leave Badcases unchanged.</small></span>
+                    </label>
+                    <label>
+                        <input type="radio" name="case-refresh-scope" value="all" />
+                        <span><strong data-i18n="allCases">All Cases</strong><small data-i18n="refreshAllHelp">Refresh both Goodcases and Badcases.</small></span>
+                    </label>
+                </fieldset>
+                <p id="case-refresh-batch-count" class="refresh-batch-selection"></p>
+                <div class="dialog-footer">
+                    <span></span>
+                    <button id="cancel-case-refresh-batch" type="button" data-i18n="cancel">Cancel</button>
+                    <button id="confirm-case-refresh-batch" class="primary" type="submit" data-i18n="startRefreshBatch">Start refresh</button>
+                </div>
+            </form>
+        </dialog>
+
+        <dialog id="discard-curation-dialog" class="case-dialog confirm-dialog">
+            <div class="confirm-dialog-body">
+                <div class="dialog-header">
+                    <div>
+                        <div class="drawer-eyebrow" data-i18n="caseDraft">CASE DRAFT</div>
+                        <h2 data-i18n="discardDraft">Discard this draft?</h2>
+                    </div>
+                    <button id="close-discard-dialog" class="icon-button large" type="button">×</button>
+                </div>
+                <p data-i18n="discardDraftHelp">The Curator task will be stopped and archived. No case will be saved.</p>
+                <div class="dialog-footer">
+                    <span></span>
+                    <button id="cancel-discard" type="button" data-i18n="cancel">Cancel</button>
+                    <button id="confirm-discard" class="danger" type="button" data-i18n="discard">Discard</button>
+                </div>
+            </div>
+        </dialog>
+
+        <dialog id="save-case-dialog" class="case-dialog">
+            <form id="save-case-form">
+                <div class="dialog-header">
+                    <div>
+                            <div class="drawer-eyebrow" data-i18n="curateEvaluationData">CURATE EVALUATION DATA</div>
+                        <h2 data-i18n="curateEpisode">Curate a problem-solving episode</h2>
+                    </div>
+                    <button id="close-case-dialog" class="icon-button large" type="button">×</button>
+                </div>
+
+                <label class="field">
+                    <span data-i18n="dataset">Dataset</span>
+                    <select id="case-dataset" required></select>
+                </label>
+                <div class="new-dataset-row">
+                    <input id="new-dataset-name" type="text" placeholder="Create a new dataset" data-i18n-placeholder="createDataset" maxlength="100" />
+                    <select id="new-dataset-skill" required aria-label="Dataset Skill"></select>
+                    <button id="create-dataset" type="button" data-i18n="create">Create</button>
+                </div>
+
+                <div class="dataset-skill-heading">
+                    <span data-i18n="datasetSkill">Dataset Skill</span>
+                </div>
+                <div id="case-dataset-skill-status" class="skill-preflight"></div>
+
+                <fieldset class="case-type-field">
+                    <legend data-i18n="classification">Classification</legend>
+                    <label>
+                        <input type="radio" name="case-type" value="goodcase" checked />
+                        <span><strong>Goodcase</strong><small data-i18n="expectedSkill">Expected Skill behavior</small></span>
+                    </label>
+                    <label>
+                        <input type="radio" name="case-type" value="badcase" />
+                        <span><strong>Badcase</strong><small data-i18n="needsImprovement">Needs improvement</small></span>
+                    </label>
+                </fieldset>
+
+                <label class="field">
+                    <span data-i18n="episodeStartsAt">Episode starts at</span>
+                    <select id="case-start-item" required></select>
+                </label>
+                <label class="field">
+                    <span data-i18n="issueDescription">Dataset issue · agent answer (optional)</span>
+                    <textarea id="case-issue-description" rows="4" maxlength="120000"></textarea>
+                    <small class="field-help" data-i18n="issueDescriptionHelp">Describe what happened in the captured agent answer. This does not change the original evaluation question.</small>
+                </label>
+                <div id="case-scope" class="case-scope"></div>
+                <label class="field">
+                    <span data-i18n="endingResponse">Selected ending response</span>
+                    <textarea id="case-end-preview" rows="5" readonly></textarea>
+                </label>
+                <p id="case-create-error" class="case-dialog-error hidden" role="alert"></p>
+
+                <div class="dialog-footer">
+                    <span data-i18n="frozenCopyHelp">A frozen copy goes to Curator; the original task stays live.</span>
+                    <button id="cancel-save-case" type="button" data-i18n="cancel">Cancel</button>
+                    <button id="confirm-save-case" class="primary" type="submit" data-i18n="startCuration">Start curation</button>
+                </div>
+            </form>
+        </dialog>
+
+        <dialog id="dataset-skill-dialog" class="case-dialog confirm-dialog">
+            <form id="dataset-skill-form" class="confirm-dialog-body">
+                <div class="dialog-header">
+                    <div>
+                        <div class="drawer-eyebrow">DATASET SKILL</div>
+                        <h2 data-i18n="bindDatasetSkill">Bind dataset Skill</h2>
+                    </div>
+                    <button id="close-dataset-skill-dialog" class="icon-button large" type="button">×</button>
+                </div>
+                <p id="dataset-skill-dialog-copy"></p>
+                <label class="field">
+                    <span data-i18n="datasetSkill">Dataset Skill</span>
+                    <select id="dataset-skill-select" required></select>
+                </label>
+                <p class="field-help" data-i18n="datasetSkillHistoryHelp">Existing Cases and evaluation runs keep their frozen historical evidence.</p>
+                <div class="dialog-footer">
+                    <span></span>
+                    <button id="cancel-dataset-skill" type="button" data-i18n="cancel">Cancel</button>
+                    <button id="confirm-dataset-skill" class="primary" type="submit" data-i18n="save">Save</button>
+                </div>
+            </form>
+        </dialog>
+
+        <dialog id="managed-git-url-dialog" class="case-dialog confirm-dialog">
+            <form id="managed-git-url-form" class="confirm-dialog-body">
+                <div class="dialog-header">
+                    <div><div class="drawer-eyebrow">GIT IMPORT</div><h2 data-i18n="cloneGitUrl">Clone Git URL</h2></div>
+                    <button id="close-managed-git-url-dialog" class="icon-button large" type="button">×</button>
+                </div>
+                <label class="field">
+                    <span data-i18n="gitUrl">Git URL</span>
+                    <input id="managed-git-url" type="text" maxlength="8192" autocomplete="off" required placeholder="https://… or git@host:owner/repo.git" />
+                </label>
+                <p id="managed-git-url-error" class="case-dialog-error hidden" role="alert"></p>
+                <div class="dialog-footer">
+                    <span></span>
+                    <button id="cancel-managed-git-url" type="button" data-i18n="cancel">Cancel</button>
+                    <button id="confirm-managed-git-url" class="primary" type="submit" data-i18n="import">Import</button>
+                </div>
+            </form>
+        </dialog>
+
+        <dialog id="managed-candidate-dialog" class="case-dialog confirm-dialog">
+            <form id="managed-candidate-form" class="confirm-dialog-body">
+                <div class="dialog-header">
+                    <div><div class="drawer-eyebrow">CANDIDATE</div><h2 data-i18n="createCandidate">Create candidate</h2></div>
+                    <button id="close-managed-candidate-dialog" class="icon-button large" type="button">×</button>
+                </div>
+                <label class="field">
+                    <span data-i18n="candidateMessage">Change summary</span>
+                    <textarea id="managed-candidate-message" rows="4" maxlength="2000" required></textarea>
+                </label>
+                <p id="managed-candidate-error" class="case-dialog-error hidden" role="alert"></p>
+                <div class="dialog-footer">
+                    <span></span>
+                    <button id="cancel-managed-candidate" type="button" data-i18n="cancel">Cancel</button>
+                    <button id="confirm-managed-candidate" class="primary" type="submit" data-i18n="createCandidate">Create candidate</button>
+                </div>
+            </form>
+        </dialog>
+
+        <dialog id="managed-release-dialog" class="case-dialog confirm-dialog">
+            <form id="managed-release-form" class="confirm-dialog-body">
+                <div class="dialog-header">
+                    <div><div class="drawer-eyebrow">RELEASE</div><h2 data-i18n="releaseVersion">Release version</h2></div>
+                    <button id="close-managed-release-dialog" class="icon-button large" type="button">×</button>
+                </div>
+                <label class="field">
+                    <span data-i18n="versionLabel">Version label</span>
+                    <input id="managed-release-label" type="text" maxlength="64" required placeholder="v1.0.0" />
+                </label>
+                <p id="managed-release-error" class="case-dialog-error hidden" role="alert"></p>
+                <div class="dialog-footer">
+                    <span></span>
+                    <button id="cancel-managed-release" type="button" data-i18n="cancel">Cancel</button>
+                    <button id="confirm-managed-release" class="primary" type="submit" data-i18n="releaseVersion">Release version</button>
+                </div>
+            </form>
+        </dialog>
+
+        <div id="toast" class="toast hidden" role="status"></div>
+        <script src="../node_modules/marked/lib/marked.umd.js"></script>
+        <script src="../node_modules/he/he.js"></script>
+        <script src="message-links.js"></script>
+        <script src="message-markdown.js"></script>
+        <script src="thread-view-state.js"></script>
+        <script src="command-activity.js"></script>
+        <script src="stream-render-queue.js"></script>
+        <script src="evaluation-format.js"></script>
+        <script src="case-calibration-batch.js"></script>
+        <script src="case-refresh-batch.js"></script>
+        <script src="automatic-capture-targets.js"></script>
+        <script src="operator-workbench.js"></script>
+        <script src="renderer.js"></script>
+    </body>
+</html>

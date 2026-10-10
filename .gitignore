@@ -1,0 +1,17 @@
+**/node_modules/
+**/dist/
+**/.DS_Store
+**/*.log
+**/*.pem
+
+.env
+.env.*
+!.env.example
+
+/.local/
+/.worktrees/
+/Rolling Skill.app/
+/rolling-skill-tool
+/Stop Rolling Skill.app/
+/desktop/rolling-skill/dist/
+/desktop/rolling-skill/dist-tools/
